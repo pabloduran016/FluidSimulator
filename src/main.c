@@ -871,8 +871,24 @@ static void init_program(Program* program)
     GLCall(glUseProgram(0));
     return;
 }
-
 // END PROGRAMS
+
+// BEGIN MENUS
+static void draw_help(const Program* text_program, const Uniform* text_color_uniform, float x, float y, int offset, Vec4 text_color)
+{
+    render_text("`ESC` > CLOSE", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
+    render_text(global_settings.draw_particles ? "`P`   > HIDE PARTICLES": "`P`   > SHOW PARTICLES", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
+    render_text(global_settings.draw_density ? "`D`   > HIDE DENSITY": "`D`   > DRAW DENSITY", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
+    render_text(global_settings.draw_flow ? "`F`   > HIDE FLOW": "`F`   > DRAW FLOW", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
+    render_text(global_settings.paused ? "`S`   > RESUME": "`S`   > STOP", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
+    render_text("`R`   > RESET", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+} 
+// END MENUS
 
 
 int main(void)
@@ -1289,27 +1305,10 @@ int main(void)
         render_text(fps_text, -window_width / 2 + 10, window_height/2 - 18, 0.6f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
 
         if (global_settings.draw_help) {
-            int offset = 0;
-            render_text("PRESS `H` TO HIDE HELP",                                                 
-                window_width / 2 - 190, window_height/2 - 18 - offset - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
-            offset += 20;
-            render_text("`ESC` > CLOSE",                                                         
-                window_width / 2 - 190, window_height/2 - 18 - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
-            offset += 20;
-            render_text(global_settings.draw_particles ? "`P`   > HIDE PARTICLES": "`P`   > SHOW PARTICLES", 
-                window_width / 2 - 190, window_height/2 - 18 - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
-            offset += 20;
-            render_text(global_settings.draw_density ? "`D`   > HIDE DENSITY": "`D`   > DRAW DENSITY",     
-                window_width / 2 - 190, window_height/2 - 18 - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
-            offset += 20;
-            render_text(global_settings.draw_flow ? "`F`   > HIDE FLOW": "`F`   > DRAW FLOW",           
-                window_width / 2 - 190, window_height/2 - 18 - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
-            offset += 20;
-            render_text(global_settings.paused ? "`S`   > RESUME": "`S`   > STOP",           
-                window_width / 2 - 190, window_height/2 - 18 - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
-            offset += 20;
-            render_text("`R`   > RESET",                                                           
-                window_width / 2 - 190, window_height/2 - 18 - offset, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
+            float x = window_width / 2 - 190;
+            float y = window_height/2 - 18;
+            render_text("PRESS `H` TO HIDE HELP", x, y, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
+            draw_help(&text_program, text_color_uniform, window_width / 2 - 190, window_height/2 - 18, 20, text_color);
         } else {
             render_text("PRESS `H` FOR HELP", window_width / 2 - 160, window_height/2 - 18, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
         }
