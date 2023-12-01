@@ -5,11 +5,17 @@
 layout (location = 0) in vec2 pos; 
 
 uniform vec2 window_resolution;
+uniform int n_cells_cols;
+uniform int n_cells_rows;
 uniform float particle_mass;
 uniform float smoothing_radius;
 uniform int n_particles;
 
 uniform sampler1D positions_encoded;
+
+uniform isampler1D cells_encoded;
+
+uniform isampler1D cells_start_encoded;
 
 const int MAX_NUMBER_OF_PARTICLES = 3000;
 
@@ -19,7 +25,7 @@ out float density_value;
 
 const float PI = 3.141593;
 
-float calculate_density(vec2 pos)
+float calculate_density_old(vec2 pos)
 {
     float density = 0;
     for (int i = 0; i < MAX_NUMBER_OF_PARTICLES; ++i) {
@@ -30,6 +36,39 @@ float calculate_density(vec2 pos)
         if (length_squared >= smoothing_radius * smoothing_radius) continue;
         float length = sqrt(length_squared);
         density += pow((smoothing_radius - length), 2);
+    }
+    return particle_mass * density * 6 / (PI * pow(smoothing_radius, 4));  // SpikyKernelPow2
+}
+
+float calculate_density(vec2 pos)
+{
+    float density = 0;
+    float squared_radius = smoothing_radius * smoothing_radius;
+    int cell_x = int(floor((pos.x / window_resolution.x + 0.5) * n_cells_cols));
+    int cell_y = int(floor((pos.y / window_resolution.y + 0.5) * n_cells_rows));
+
+    int max_iter = 1000;  // prevent infinite loop
+    // Iterate through neighbourghood only
+    for (int offset_x = -1; offset_x < 2; offset_x++) {
+        for (int offset_y = -1; offset_y < 2; offset_y++) {
+            int cell_x_i = cell_x + offset_x;
+            int cell_y_i = cell_y + offset_y;
+            if ((cell_x_i < 0) || (cell_y_i < 0) || (cell_x_i >= n_cells_cols) || (cell_y_i >= n_cells_rows)) continue;
+            float start = texelFetch(cells_start_encoded, cell_y_i*n_cells_cols + cell_x_i, 0).r;
+            while (start >= 0)
+            {
+                max_iter--;
+                if (max_iter <= 0) return density;
+                vec2 pos_i = texelFetch(positions_encoded, int(start), 0).rg;
+                start = texelFetch(cells_encoded, int(start), 0).r;
+                vec2 d_pos = pos_i - pos;
+                float length_squared = dot(d_pos, d_pos);
+                if (length_squared >= squared_radius) continue;
+                float length = sqrt(length_squared);
+                density += pow((smoothing_radius - length), 2);
+            }
+            
+        }
     }
     return particle_mass * density * 6 / (PI * pow(smoothing_radius, 4));  // SpikyKernelPow2
 }

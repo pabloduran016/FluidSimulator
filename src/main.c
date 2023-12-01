@@ -312,18 +312,48 @@ typedef struct {
     float near_density;
 } Density;
 
-Density calculate_density(Vec2 pos, Vec2* positions, float particle_mass, float smoothing_radius, size_t n_particles)
+Density calculate_density(
+    Vec2 pos,
+    int* cells,
+    int* cells_start,
+    size_t n_cells_rows,
+    size_t n_cells_cols,
+    float window_width,
+    float window_height,
+    Vec2* positions,
+    float particle_mass,
+    float smoothing_radius,
+    size_t n_particles)
 {
     float density = 0;
     float near_density = 0;
     float squared_radius = smoothing_radius * smoothing_radius;
-    for (size_t i = 0; i < n_particles; ++i) {
-        Vec2 pos_i = positions[i];
-        float length_squared = vec2_squared_length(vec2_sub(pos_i, pos));
-        if (length_squared >= squared_radius) continue;
-        float length = sqrt(length_squared);
-        density += pow((smoothing_radius - length), 2);
-        near_density += pow((smoothing_radius - length), 3);
+    size_t cell_x = floor((pos.x / window_width + 0.5) * n_cells_cols);
+    size_t cell_y = floor((pos.y / window_height + 0.5) * n_cells_rows);
+
+    // Iterate through neighbourghood only
+    //printf("pos (%.02f, %.02f)\n", pos.x, pos.y);
+    for (int offset_x = -1; offset_x < 2; offset_x++) {
+        for (int offset_y = -1; offset_y < 2; offset_y++) {
+            size_t cell_x_i = cell_x + offset_x;
+            size_t cell_y_i = cell_y + offset_y;
+            if ((cell_x_i < 0) || (cell_y_i < 0) || (cell_x_i >= n_cells_cols) || (cell_y_i >= n_cells_rows)) continue;
+            //printf("offset(%zu, %zu)\n", offset_x, offset_y);
+            int start = cells_start[cell_y_i*n_cells_cols + cell_x_i];
+            while (start >= 0)
+            {
+                Vec2 pos_i = positions[start];
+                //printf("\t (%d) offset(%zu, %zu) pos_i (%.02f, %.02f)\n", start, offset_x, offset_y, pos_i.x, pos_i.y);
+                start = cells[start];
+
+                float length_squared = vec2_squared_length(vec2_sub(pos_i, pos));
+                if (length_squared >= squared_radius) continue;
+                float length = sqrt(length_squared);
+                density += pow((smoothing_radius - length), 2);
+                near_density += pow((smoothing_radius - length), 3);
+            }
+            
+        }
     }
     return (Density) {
         .density = particle_mass * density * 6 / (M_PI * pow(smoothing_radius, 4)),  // SpikyKernelPow2
@@ -331,8 +361,34 @@ Density calculate_density(Vec2 pos, Vec2* positions, float particle_mass, float 
     };
 }
 
-Vec2 calculate_pressure_force(size_t particle_index, Vec2* positions, float particle_mass, float smoothing_radius, float pressure_multiplier, float target_density, Density* densities, size_t n_particles, float near_pressure_multiplier)
+
+typedef struct {
+    Vec2 viscosity;
+    Vec2 pressure;
+} Forces;
+
+
+Forces calculate_forces(
+    size_t particle_index,
+    int* cells,
+    int* cells_start,
+    size_t n_cells_rows,
+    size_t n_cells_cols,
+    float window_width,
+    float window_height,
+    Vec2* positions,
+    Vec2* velocities,
+    float particle_mass,
+    float smoothing_radius,
+    float pressure_multiplier,
+    float target_density,
+    Density* densities,
+    size_t n_particles,
+    float viscosity_multiplier,
+    float near_pressure_multiplier)
 {
+    Forces forces = {0};
+
 	float density = densities[particle_index].density;
 	float near_density = densities[particle_index].near_density;
 	float pressure = (density - target_density) * pressure_multiplier;  // pressure from density
@@ -341,73 +397,70 @@ Vec2 calculate_pressure_force(size_t particle_index, Vec2* positions, float part
     float squared_radius = smoothing_radius * smoothing_radius;
 	
 	Vec2 pos = positions[particle_index];
-
-    for (size_t i = 0; i < n_particles; i++)
-    // }
-    // return vec2_scale(pressure_force, - pressure_multiplier / 2 * particle_mass * 3 / (M_PI * pow(smoothing_radius, 5) / 10));
-    {
-        if (i == particle_index) continue;
-        
-        Vec2 pos_i = positions[i];
-        float density_i = densities[i].density;
-        float near_density_i = densities[i].near_density;
-        Vec2 d_pos = vec2_sub(pos_i, pos);
-
-        float length_squared = vec2_squared_length(d_pos);
-        if (length_squared > squared_radius) continue;
-        float length = sqrt(length_squared);
-
-        Vec2 dir;
-        if (length_squared == 0) {
-            dir = vec2_normalize((Vec2) {randnum(-1, 1), randnum(-1, 1)});
-        } else {
-            dir = vec2_normalize(d_pos);
-        }
-        
-        float pressure_i = (density_i - target_density) * pressure_multiplier;  // pressure from density
-        float near_pressure_i = near_pressure_multiplier * near_density_i;  // near pressure from density
-
-        float shared_pressure = (pressure + pressure_i) * 0.5;
-        float shared_near_pressure = (near_pressure + near_pressure_i) * 0.5;
-
-        pressure_force = vec2_add(
-            pressure_force, 
-            vec2_scale(
-                dir, 
-                (
-                    - (smoothing_radius - length) * 12 / (pow(smoothing_radius, 4) * M_PI) * shared_pressure / density_i +  // DensityDerivative
-            		- pow(smoothing_radius - length, 2) * 30 / (pow(smoothing_radius, 5) * M_PI) * shared_near_pressure / near_density_i  // NearDensityDerivative
-        )));
-        // printf("(%zu) -> pressure_force (%f, %f); length %f; smoothing_radius %f; position (%f, %f); d_pos (%f, %f)\n", particle_index, pressure_force.x, pressure_force.y, length, smoothing_radius, pos.x, pos.y, d_pos.x, d_pos.y);
-    }
-    return pressure_force;
-}
-
-
-Vec2 calculate_viscosity_force(size_t particle_index, Vec2* positions, Vec2* velocities, size_t n_particles, float smoothing_radius, float viscosity_multiplier)
-{
-	Vec2 pos = positions[particle_index];
-	float squared_radius = smoothing_radius * smoothing_radius;
-
-	Vec2 viscosity_force = {0};
 	Vec2 velocity = velocities[particle_index];
+    size_t cell_x = floor((pos.x / window_width + 0.5) * n_cells_cols);
+    size_t cell_y = floor((pos.y / window_height + 0.5) * n_cells_rows);
 
-    for (size_t i = 0; i < n_particles; i++)
-    {
-        if (i == particle_index) continue;
-        Vec2 pos_i = positions[i];
-        Vec2 d_pos = vec2_sub(pos_i, pos);
-        float squared_length = vec2_squared_length(d_pos);
+    // Iterate through neighbourghood only
+    for (int offset_x = -1; offset_x < 2; offset_x++) {
+        for (int offset_y = -1; offset_y < 2; offset_y++) {
+            size_t cell_x_i = cell_x + offset_x;
+            size_t cell_y_i = cell_y + offset_y;
+            if ((cell_x_i < 0) || (cell_y_i < 0) || (cell_x_i >= n_cells_cols) || (cell_y_i >= n_cells_rows)) continue;
+            int start = cells_start[cell_y_i*n_cells_cols + cell_x_i];
+            while (start >= 0)
+            {
+                size_t i = start;
+                start = cells[start];
+                if (i == particle_index) continue;
 
-        if (squared_length > squared_radius) continue;
+                Vec2 pos_i = positions[i];
+                Vec2 velocity_i = velocities[i];
+                float density_i = densities[i].density;
+                float near_density_i = densities[i].near_density;
 
-        float length = sqrt(squared_length);
-        Vec2 velocity_i = velocities[i];
+                Vec2 d_pos = vec2_sub(pos_i, pos);
 
-        viscosity_force = vec2_add(viscosity_force, vec2_scale(vec2_sub(velocity_i, velocity), pow(smoothing_radius * smoothing_radius - length * length, 3)));  // SmoothingKernelPoly6
+                float length_squared = vec2_squared_length(d_pos);
+                if (length_squared > squared_radius) continue;
+                float length = sqrt(length_squared);
+
+                Vec2 dir;
+                if (length_squared == 0) {
+                    dir = vec2_normalize((Vec2) {randnum(-1, 1), randnum(-1, 1)});
+                } else {
+                    dir = vec2_normalize(d_pos);
+                }
+                
+                float pressure_i = (density_i - target_density) * pressure_multiplier;  // pressure from density
+                float near_pressure_i = near_pressure_multiplier * near_density_i;  // near pressure from density
+
+                float shared_pressure = (pressure + pressure_i) * 0.5;
+                float shared_near_pressure = (near_pressure + near_pressure_i) * 0.5;
+
+                forces.viscosity = vec2_add(forces.viscosity, 
+                    vec2_scale(
+                        vec2_sub(velocity_i, velocity), 
+                        pow(smoothing_radius * smoothing_radius - length * length, 3) * viscosity_multiplier * 4 / (M_PI * pow(smoothing_radius, 8))
+                    )
+                );  // SmoothingKernelPoly6
+
+                forces.pressure = vec2_add(
+                    forces.pressure, 
+                    vec2_scale(
+                        dir, 
+                        (
+                            - (smoothing_radius - length) * 12 / (pow(smoothing_radius, 4) * M_PI) * shared_pressure / density_i +  // DensityDerivative
+                            - pow(smoothing_radius - length, 2) * 30 / (pow(smoothing_radius, 5) * M_PI) * shared_near_pressure / near_density_i  // NearDensityDerivative
+                )));
+                // printf("(%zu) -> pressure_force (%f, %f); length %f; smoothing_radius %f; position (%f, %f); d_pos (%f, %f)\n", particle_index, pressure_force.x, pressure_force.y, length, smoothing_radius, pos.x, pos.y, d_pos.x, d_pos.y);
+            }
+        }
     }
-	return vec2_scale(viscosity_force, viscosity_multiplier * 4 / (M_PI * pow(smoothing_radius, 8)));
+
+    return forces;
 }
+
 
 Vec2 calculate_wall_force(Vec2 pos, float window_width, float window_height, float wall_force_radius, float wall_force_multiplier) 
 {
@@ -442,6 +495,13 @@ Vec2 calculate_interaction_force(size_t particle_index, Vec2 *positions, Vec2 *v
     return interaction_force;
 }
 // END PHYSICS
+
+// BEGIN CELLS
+static void fill_cells(int* cells_start, size_t number_of_items, int fill_val)
+{
+    memset(cells_start, -1, sizeof(int) * number_of_items);
+}
+// END CELLS
 
 
 // BEGIN CLOCK
@@ -567,7 +627,7 @@ bool initialized_glfw = false;
 static void terminate()
 {
     if (initialized_glfw) {
-        terminate();
+        glfwTerminate();
     }
     return;
 }
@@ -725,8 +785,18 @@ typedef enum {
     UNIFORM_TYPE_FLOAT,
     UNIFORM_TYPE_VEC2,
     UNIFORM_TYPE_VEC3,
-    UNIFORM_TYPE_VEC4
+    UNIFORM_TYPE_VEC4,
+    UNIFORM_TYPE_TEXTURE1D
 } UNIFORM_TYPE;
+
+typedef struct {
+    unsigned int id;
+    unsigned int unit;
+    GLenum internal_format;
+    size_t width;
+    GLenum format;
+    GLenum type;
+} Texture1D;
 
 typedef struct {
     const char* name; 
@@ -738,6 +808,7 @@ typedef struct {
         Vec2 initial_vec2;
         Vec3 initial_vec3;
         Vec4 initial_vec4;
+        Texture1D texture1D;
     };
 } Uniform;
 
@@ -863,6 +934,16 @@ static void init_program(Program* program)
                 break;
             case UNIFORM_TYPE_VEC4:
                 GLCall(glUniform4f(loc, program->uniforms[i].initial_vec4.x, program->uniforms[i].initial_vec4.y, program->uniforms[i].initial_vec4.z, program->uniforms[i].initial_vec4.w));
+                break;
+            case UNIFORM_TYPE_TEXTURE1D:
+                GLCall(glUniform1i(loc, program->uniforms[i].texture1D.unit));
+                GLCall(glGenTextures(1, &program->uniforms[i].texture1D.id));
+                GLCall(glActiveTexture(GL_TEXTURE0 + program->uniforms[i].texture1D.unit));
+                GLCall(glBindTexture(GL_TEXTURE_1D, program->uniforms[i].texture1D.id));
+                GLCall(glTexImage1D(GL_TEXTURE_1D, 0, program->uniforms[i].texture1D.internal_format, program->uniforms[i].texture1D.width, 0, program->uniforms[i].texture1D.format, program->uniforms[i].texture1D.type, NULL));
+                GLCall(glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+                GLCall(glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+                GLCall(glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
                 break;
             default:
                 assert(0);
@@ -997,7 +1078,7 @@ int main(void)
     Uniform flow_uniforms[] = {
         {.name = "max_arrow_size", .type = UNIFORM_TYPE_FLOAT, .initial_float = 50},
         {.name = "arrow_width", .type = UNIFORM_TYPE_FLOAT, .initial_float = 2},
-        {.name = "flow_color", .type = UNIFORM_TYPE_VEC4, .initial_vec4 = {0.5, 0.4, 0.7, 1}},
+        //{.name = "flow_color", .type = UNIFORM_TYPE_VEC4, .initial_vec4 = {0.5, 0.4, 0.7, 1}},
         {.name = "window_resolution", .type = UNIFORM_TYPE_VEC2, .initial_vec2 = {window_width, window_height}}
     };
     Uniform* max_arrow_size_uniform = get_uniform(particles_uniforms, "particle_radius");
@@ -1014,7 +1095,7 @@ int main(void)
     };
     init_program(&flow_program);
     
-#define NUMBER_OF_ROWS 150
+#define NUMBER_OF_ROWS 200
 #define NUMBER_OF_COLUMNS 200
     // TODO: This could be done with draw instanced...just save veertices for oone cell
     Vec2 density_vertices[NUMBER_OF_ROWS + 1][NUMBER_OF_COLUMNS + 1];
@@ -1022,17 +1103,34 @@ int main(void)
     Quad density_indices[NUMBER_OF_ROWS][NUMBER_OF_COLUMNS];
     initialize_density_vertices(NUMBER_OF_COLUMNS, NUMBER_OF_ROWS, density_vertices, density_indices, window_width, window_height);
 
+#define MIN_SMOOTHING_RADIUS 20
+#define MAX_WINDOW_WIDTH 2000
+#define MAX_WINDOW_HEIGHT 2000
+#define MAX_NUMBER_OF_CELLS MAX_WINDOW_HEIGHT / MIN_SMOOTHING_RADIUS * MAX_WINDOW_WIDTH / MIN_SMOOTHING_RADIUS
+
     Uniform density_uniforms[] = {
         {.name = "particle_mass", .type = UNIFORM_TYPE_FLOAT, .initial_float = 0},
         {.name = "smoothing_radius", .type = UNIFORM_TYPE_FLOAT, .initial_float = 0},
         {.name = "n_particles", .type = UNIFORM_TYPE_INT, .initial_float = 0},
-        {.name = "target_density", .type = UNIFORM_TYPE_FLOAT, .initial_float = 0},
-        {.name = "window_resolution", .type = UNIFORM_TYPE_VEC2, .initial_vec2 = {window_width, window_height}}
+        {.name = "target_density", .type = UNIFORM_TYPE_FLOAT, .initial_float = 1},
+        {.name = "window_resolution", .type = UNIFORM_TYPE_VEC2, .initial_vec2 = {window_width, window_height}},
+        {.name = "n_cells_cols", .type = UNIFORM_TYPE_INT, .initial_int = 0},
+        {.name = "n_cells_rows", .type = UNIFORM_TYPE_INT, .initial_int = 0},
+
+        {.name = "positions_encoded", .type = UNIFORM_TYPE_TEXTURE1D,   .texture1D = {.unit = 0, .internal_format = GL_RG16F, .width = MAX_NUMBER_OF_PARTICLES, .format = GL_RG,          .type = GL_FLOAT}},
+        {.name = "cells_encoded", .type = UNIFORM_TYPE_TEXTURE1D,       .texture1D = {.unit = 1, .internal_format = GL_R32I,  .width = MAX_NUMBER_OF_PARTICLES, .format = GL_RED_INTEGER, .type = GL_INT}},
+        {.name = "cells_start_encoded", .type = UNIFORM_TYPE_TEXTURE1D, .texture1D = {.unit = 2, .internal_format = GL_R32I,  .width = MAX_NUMBER_OF_CELLS,     .format = GL_RED_INTEGER, .type = GL_INT}},
     };
     Uniform *particle_mass_uniform = get_uniform(density_uniforms, "particle_mass");
     Uniform *smoothing_radius_uniform = get_uniform(density_uniforms, "smoothing_radius");
     Uniform *n_particles_uniform = get_uniform(density_uniforms, "n_particles");
     Uniform *target_density_uniform = get_uniform(density_uniforms, "target_density");
+    Uniform *n_cells_cols_uniform = get_uniform(density_uniforms, "n_cells_cols");
+    Uniform *n_cells_rows_uniform = get_uniform(density_uniforms, "n_cells_rows");
+
+    Uniform *positions_encoded_uniform = get_uniform(density_uniforms, "positions_encoded");
+    Uniform *cells_encoded_uniform = get_uniform(density_uniforms, "cells_encoded");
+    Uniform *cells_start_encoded_uniform = get_uniform(density_uniforms, "cells_start_encoded");
     Attribute density_attributes[] = {
         {.name = "position", .size_items = 2, .type = GL_FLOAT, .normalized = GL_FALSE, .size_bytes = 2 * sizeof(float)},
     };
@@ -1056,26 +1154,17 @@ int main(void)
         .n_uniforms = sizeof(density_uniforms) / sizeof(density_uniforms[0])
     };
     init_program(&density_program);
-    GLCall(glUseProgram(density_program.program_id));
-    // generate positions_encoded texture
-    unsigned int encoded_positions_texture_id;
-    GLCall(glGenTextures(1, &encoded_positions_texture_id));
-    GLCall(glActiveTexture(GL_TEXTURE0));
-    GLCall(glBindTexture(GL_TEXTURE_1D, encoded_positions_texture_id));
-    GLCall(glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
-    GLCall(glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
-    GLCall(glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
-
+   
     // SETTINGS
-    size_t number_of_particles = 1000;
+    size_t number_of_particles = 2000;
     float particle_radius = 2.0f;
     float particle_mass = 0.5f;
     Vec2 gravity = (Vec2) {.x = 0, .y = -300};
     float dampig_coefficient = 0.7;
     float smoothing_radius = 50;
-    float pressure_multiplier      = 25000;
+    float pressure_multiplier      = 30000;
     float near_pressure_multiplier = 5000;
-    float viscosity_multiplier = 900;
+    float viscosity_multiplier = 700;
     float target_density = 0.0003;
     float wall_force_radius = particle_radius*1.1;
     float wall_force_multiplier = 200;
@@ -1092,8 +1181,8 @@ int main(void)
     // for (size_t i = 0; i < number_of_particles; ++i) {
     //     particles[i] = (Particle) {.pos = {randnum(- window_width / 2, window_width / 2), randnum(- window_height / 2, window_height / 2)}, .vel = {randnum(-MAX_INITIAL_VELOCITY, MAX_INITIAL_VELOCITY), randnum(-MAX_INITIAL_VELOCITY, MAX_INITIAL_VELOCITY)}};
     // }
-    int spacing = smoothing_radius*0.1;
-    float max_velocity = 20;
+    int spacing = smoothing_radius*0.12;
+    float max_velocity = 0;
     init_particles(particles, number_of_particles, max_velocity, spacing);
 
 #define FPS 200
@@ -1106,6 +1195,21 @@ int main(void)
     Vec2 predicted_positions[MAX_NUMBER_OF_PARTICLES] = {0};
     Vec2 velocities[MAX_NUMBER_OF_PARTICLES] = {0};
     Vec2 positions_uniform[MAX_NUMBER_OF_PARTICLES] = {0};
+    
+    // Number of cells depends on smoothing radius. Lets say that smoothing radius is never less than 10 and window size is less that 2000 x 2000
+    assert(smoothing_radius >= MIN_SMOOTHING_RADIUS);
+    assert(window_width <= MAX_WINDOW_WIDTH);
+    assert(window_height <= MAX_WINDOW_HEIGHT);
+    size_t n_cells_cols = ceil(window_width / smoothing_radius);
+    size_t n_cells_rows = ceil(window_height / smoothing_radius);
+    // This is going to store a linked list in the following way:
+    // To get the index of the first particle at cell (i, j) you do: start = cells_start[j * n_cells_cols + i]
+    // The first particle at that cell will be in in particles[start];
+    // To get the next element you reach next = cells[start];
+    // Until next is < 0 that you break.
+    int cells_start[MAX_WINDOW_HEIGHT / MIN_SMOOTHING_RADIUS * MAX_WINDOW_WIDTH / MIN_SMOOTHING_RADIUS] = {-1};
+    fill_cells(cells_start, n_cells_rows * n_cells_cols, -1);
+    int cells[MAX_NUMBER_OF_PARTICLES] = {-1};
 
     Clock clock;
     clock_init(&clock);
@@ -1125,6 +1229,13 @@ int main(void)
     GLCall(glUniform1f(smoothing_radius_uniform->location, smoothing_radius));
     GLCall(glUniform1i(n_particles_uniform->location, number_of_particles));
     GLCall(glUniform1f(target_density_uniform->location, target_density));
+    GLCall(glUniform1i(n_cells_cols_uniform->location, n_cells_cols));
+    GLCall(glUniform1i(n_cells_rows_uniform->location, n_cells_rows));
+    glActiveTexture(GL_TEXTURE0 + positions_encoded_uniform->texture1D.unit);
+    glBindTexture(GL_TEXTURE_1D, positions_encoded_uniform->texture1D.id);
+    glTexImage1D(GL_TEXTURE_1D, 0, GL_RG16F, MAX_NUMBER_OF_PARTICLES, 0, GL_RG,
+  GL_FLOAT, NULL);
+
 
     GLCall(glUseProgram(interaction_force_program.program_id));
     GLCall(glUniform1f(interaction_radius_uniform->location, interaction_radius));
@@ -1134,6 +1245,9 @@ int main(void)
     TIME_THIS_INIT(total_execution)
     TIME_THIS_INIT(physics)
     TIME_THIS_INIT(physics_loop_calculate_densities)
+    TIME_THIS_INIT(physics_loop_calculate_interaction_forces)
+    TIME_THIS_INIT(physics_loop_calculate_viscosity)
+    TIME_THIS_INIT(physics_loop_calculate_pressure)
     TIME_THIS_INIT(physics_loop_calculate_forces)
 
     TIME_THIS_BEGIN(total_execution)
@@ -1169,31 +1283,55 @@ int main(void)
         {
             TIME_THIS_BEGIN(physics)
             // Physics -> slow (6.4 / 7.2)
+
             // Physics-Predicted Positions -> fast (0.0021 / 7.2)
             for (size_t i = 0; i < number_of_particles; ++i) {
                 predicted_positions[i] = vec2_add(particles[i].pos, vec2_scale(particles[i].vel, 1/120));
                 velocities[i] = particles[i].vel;
             }
+
+            // Organise in cells
+            fill_cells(cells_start, n_cells_rows * n_cells_cols, -1);
+            for (size_t i = 0; i < number_of_particles; ++i) {
+                Vec2 pos = predicted_positions[i];
+                size_t cell_x = floor((pos.x / window_width + 0.5) * n_cells_cols);
+                size_t cell_y = floor((pos.y / window_height + 0.5) * n_cells_rows);
+                int start = cells_start[cell_y * n_cells_cols + cell_x];
+                // printf("n_pos_x %f, n_pos_y %f ;cell_x %zu, cell_y %zu -> %d\n", normalised_pos.x, normalised_pos.y, cell_x, cell_y, start);
+                if (start < 0) {
+                    cells_start[cell_y * n_cells_cols + cell_x] = i;
+                    cells[i] = -1;
+                } else {
+                    int next = start;
+                    while (next >= 0) {
+                        start = next;
+                        next = cells[start];
+                    }
+                    cells[start] = i;
+                    cells[i] = -1;
+                }
+            }
             
             // Physics-Densities -> slow (2.0 / 7.2)
             TIME_THIS_BEGIN(physics_loop_calculate_densities)
             for (size_t i = 0; i < number_of_particles; ++i) {
-                densities[i] = calculate_density(predicted_positions[i], predicted_positions, particle_mass, smoothing_radius, number_of_particles);
+                densities[i] = calculate_density(predicted_positions[i], cells, cells_start, n_cells_rows, n_cells_cols, window_width, window_height, predicted_positions, particle_mass, smoothing_radius, number_of_particles);
             }      
             TIME_THIS_END(physics_loop_calculate_densities)
 
             // Physics-Forces -> slow (4.4 / 7.2)
+
             TIME_THIS_BEGIN(physics_loop_calculate_forces)
             for (size_t i = 0; i < number_of_particles; ++i) {
-                pressure_forces[i] = calculate_pressure_force(i, predicted_positions, particle_mass, smoothing_radius, pressure_multiplier, target_density, densities, number_of_particles, near_pressure_multiplier);
+                Forces forces = calculate_forces(i, cells, cells_start, n_cells_rows, n_cells_cols, window_width, window_height, predicted_positions, velocities, particle_mass, smoothing_radius, pressure_multiplier, target_density, densities, number_of_particles, viscosity_multiplier, near_pressure_multiplier);
+                pressure_forces[i] = forces.pressure;
+                viscosity_forces[i] = forces.viscosity;
             }
-            for (size_t i = 0; i < number_of_particles; ++i) {
-                viscosity_forces[i] = calculate_viscosity_force(i, predicted_positions, velocities, number_of_particles, smoothing_radius, viscosity_multiplier);
-            }
+            TIME_THIS_END(physics_loop_calculate_forces)
+
             for (size_t i = 0; i < number_of_particles; ++i) {
                 interaction_forces[i] = interaction_multiplier != 0 ? calculate_interaction_force(i, predicted_positions, velocities, interaction_position, interaction_radius, interaction_multiplier) : vec2(0, 0);
             }
-            TIME_THIS_END(physics_loop_calculate_forces)
             
             // Physics-Update Particles -> normal-fast (0.02 / 7.2)
             for (size_t i = 0; i < number_of_particles; ++i) {
@@ -1253,18 +1391,44 @@ int main(void)
             text_color = (Vec4) {0.8, 0.8, 0.8, 0.6};
             GLCall(glUseProgram(density_program.program_id));
 
-            GLCall(glActiveTexture(GL_TEXTURE0));
-            GLCall(glBindTexture(GL_TEXTURE_1D, encoded_positions_texture_id));
-            GLCall(glTexImage1D(
+            GLCall(glActiveTexture(GL_TEXTURE0 + positions_encoded_uniform->texture1D.unit));
+            GLCall(glBindTexture(GL_TEXTURE_1D, positions_encoded_uniform->texture1D.id));
+            GLCall(glTexSubImage1D(
                 GL_TEXTURE_1D,
                 0,
-                GL_RG16F,
-                MAX_NUMBER_OF_PARTICLES,
                 0,
+                MAX_NUMBER_OF_PARTICLES,
                 GL_RG,
                 GL_FLOAT,
                 positions_uniform
             ));
+
+            //int c[] = {1, 2, 3};
+            // float c[] = {{1, 2}, {3, 4}, {5, 6}};
+            GLCall(glActiveTexture(GL_TEXTURE0 + cells_encoded_uniform->texture1D.unit));
+            GLCall(glBindTexture(GL_TEXTURE_1D, cells_encoded_uniform->texture1D.id));
+            GLCall(glTexSubImage1D(    
+                GL_TEXTURE_1D,
+                0,
+                0,
+                MAX_NUMBER_OF_PARTICLES,
+                GL_RED_INTEGER,
+                GL_INT,
+                cells
+            ));
+
+            GLCall(glActiveTexture(GL_TEXTURE0 + cells_start_encoded_uniform->texture1D.unit));
+            GLCall(glBindTexture(GL_TEXTURE_1D, cells_start_encoded_uniform->texture1D.id));
+            GLCall(glTexSubImage1D(
+                GL_TEXTURE_1D,
+                0,
+                0,
+                n_cells_cols * n_cells_rows,
+                GL_RED_INTEGER,
+                GL_INT,
+                cells_start
+            ));
+            
             GLCall(glBindVertexArray(density_program.vao.id));
             //GLCall(glBindBuffer(GL_ARRAY_BUFFER, density_vbo));
             GLCall(glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, density_program.ibo.id));
@@ -1324,6 +1488,9 @@ int main(void)
     TIME_THIS_RECAP(total_execution)
     TIME_THIS_RECAP(physics)
     TIME_THIS_RECAP(physics_loop_calculate_densities)
+    TIME_THIS_RECAP(physics_loop_calculate_interaction_forces)
+    TIME_THIS_RECAP(physics_loop_calculate_viscosity)
+    TIME_THIS_RECAP(physics_loop_calculate_pressure)
     TIME_THIS_RECAP(physics_loop_calculate_forces)
     GLCall(glDeleteProgram(particles_program.program_id));
     GLCall(glDeleteProgram(density_program.program_id));
