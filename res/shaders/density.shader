@@ -9,7 +9,6 @@ uniform int n_cells_cols;
 uniform int n_cells_rows;
 uniform float particle_mass;
 uniform float smoothing_radius;
-uniform int n_particles;
 
 uniform sampler1D positions_encoded;
 
@@ -25,20 +24,20 @@ out float density_value;
 
 const float PI = 3.141593;
 
-float calculate_density_old(vec2 pos)
-{
-    float density = 0;
-    for (int i = 0; i < MAX_NUMBER_OF_PARTICLES; ++i) {
-        if (i >= n_particles) break;
-        // vec2 pos_i = positions[i];
-        vec2 pos_i = texelFetch(positions_encoded, i, 0).rg;
-        float length_squared = dot(pos_i - pos, pos_i - pos);
-        if (length_squared >= smoothing_radius * smoothing_radius) continue;
-        float length = sqrt(length_squared);
-        density += pow((smoothing_radius - length), 2);
-    }
-    return particle_mass * density * 6 / (PI * pow(smoothing_radius, 4));  // SpikyKernelPow2
-}
+// float calculate_density_old(vec2 pos)
+// {
+//     float density = 0;
+//     for (int i = 0; i < MAX_NUMBER_OF_PARTICLES; ++i) {
+//         if (i >= n_particles) break;
+//         // vec2 pos_i = positions[i];
+//         vec2 pos_i = texelFetch(positions_encoded, i, 0).rg;
+//         float length_squared = dot(pos_i - pos, pos_i - pos);
+//         if (length_squared >= smoothing_radius * smoothing_radius) continue;
+//         float length = sqrt(length_squared);
+//         density += pow((smoothing_radius - length), 2);
+//     }
+//     return particle_mass * density * 6 / (PI * pow(smoothing_radius, 4));  // SpikyKernelPow2
+// }
 
 float calculate_density(vec2 pos)
 {

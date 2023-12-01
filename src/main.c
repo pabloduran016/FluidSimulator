@@ -1111,7 +1111,6 @@ int main(void)
     Uniform density_uniforms[] = {
         {.name = "particle_mass", .type = UNIFORM_TYPE_FLOAT, .initial_float = 0},
         {.name = "smoothing_radius", .type = UNIFORM_TYPE_FLOAT, .initial_float = 0},
-        {.name = "n_particles", .type = UNIFORM_TYPE_INT, .initial_float = 0},
         {.name = "target_density", .type = UNIFORM_TYPE_FLOAT, .initial_float = 1},
         {.name = "window_resolution", .type = UNIFORM_TYPE_VEC2, .initial_vec2 = {window_width, window_height}},
         {.name = "n_cells_cols", .type = UNIFORM_TYPE_INT, .initial_int = 0},
@@ -1123,7 +1122,6 @@ int main(void)
     };
     Uniform *particle_mass_uniform = get_uniform(density_uniforms, "particle_mass");
     Uniform *smoothing_radius_uniform = get_uniform(density_uniforms, "smoothing_radius");
-    Uniform *n_particles_uniform = get_uniform(density_uniforms, "n_particles");
     Uniform *target_density_uniform = get_uniform(density_uniforms, "target_density");
     Uniform *n_cells_cols_uniform = get_uniform(density_uniforms, "n_cells_cols");
     Uniform *n_cells_rows_uniform = get_uniform(density_uniforms, "n_cells_rows");
@@ -1227,7 +1225,6 @@ int main(void)
     GLCall(glUseProgram(density_program.program_id));
     GLCall(glUniform1f(particle_mass_uniform->location, particle_mass));
     GLCall(glUniform1f(smoothing_radius_uniform->location, smoothing_radius));
-    GLCall(glUniform1i(n_particles_uniform->location, number_of_particles));
     GLCall(glUniform1f(target_density_uniform->location, target_density));
     GLCall(glUniform1i(n_cells_cols_uniform->location, n_cells_cols));
     GLCall(glUniform1i(n_cells_rows_uniform->location, n_cells_rows));
