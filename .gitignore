@@ -3,3 +3,5 @@
 .vscode/
 bin/
 log/
+default.profraw
+profdata_show.log

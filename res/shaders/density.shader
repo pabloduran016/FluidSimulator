@@ -53,13 +53,13 @@ float calculate_density(vec2 pos)
             int cell_x_i = cell_x + offset_x;
             int cell_y_i = cell_y + offset_y;
             if ((cell_x_i < 0) || (cell_y_i < 0) || (cell_x_i >= n_cells_cols) || (cell_y_i >= n_cells_rows)) continue;
-            float start = texelFetch(cells_start_encoded, cell_y_i*n_cells_cols + cell_x_i, 0).r;
+            int start = texelFetch(cells_start_encoded, cell_y_i*n_cells_cols + cell_x_i, 0).r;
             while (start >= 0)
             {
                 max_iter--;
                 if (max_iter <= 0) return density;
-                vec2 pos_i = texelFetch(positions_encoded, int(start), 0).rg;
-                start = texelFetch(cells_encoded, int(start), 0).r;
+                vec2 pos_i = texelFetch(positions_encoded, start, 0).rg;
+                start = texelFetch(cells_encoded, start, 0).r;
                 vec2 d_pos = pos_i - pos;
                 float length_squared = dot(d_pos, d_pos);
                 if (length_squared >= squared_radius) continue;
