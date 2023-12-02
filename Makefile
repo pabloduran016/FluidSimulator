@@ -2,7 +2,9 @@ APP_NAME = fluid_simulator
 BUILD_DIR = ./bin
 C_FILES = ./src/*.c
 CC = clang
-FLAGS = -g -fcoverage-mapping -fprofile-instr-generate
+FLAGS = 
+
+# -g -fcoverage-mapping -fprofile-instr-generate
 
 APP_DEFINES:= -DGL_SILENCE_DEPRECATION
 APP_INCLUDES:= -I./src/vendors/ -framework Cocoa -framework OpenGL -framework IOKit -framework CoreVideo -framework Carbon 

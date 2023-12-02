@@ -42,7 +42,11 @@
 
 
 // BEGIN GL ERRORS
-#define GLCall(x) GLClearError();x;GLLogCall(__LINE__, __FILE__)
+#ifdef NOT_GL_LOG_CALL
+    #define GLCall(x) x
+#else
+    #define GLCall(x) GLClearError();x;GLLogCall(__LINE__, __FILE__)
+#endif
 
 static void GLClearError(void) {
     while (glGetError() != GL_NO_ERROR) {};    
@@ -557,6 +561,7 @@ typedef struct {
     bool draw_particles;
     bool draw_help;
     bool paused;
+    bool gravity_on;
 } GlobalSettings;
 
 GlobalSettings global_settings;
@@ -564,12 +569,15 @@ bool need_reload_global_settings = false;
 bool should_reset = false;
 GlobalSettings updated_global_settings;
 
-void reload_global_settings(unsigned int particles_program, int particle_draw_density_location) 
+void reload_global_settings(unsigned int particles_program, int particle_draw_density_location, Vec2* gravity, const Vec2 gravity0) 
 {
     if (updated_global_settings.draw_density != global_settings.draw_density) {
         GLCall(glUseProgram(particles_program));
         GLCall(glUniform1i(particle_draw_density_location, updated_global_settings.draw_density));
         GLCall(glUseProgram(0));
+    } 
+    if (updated_global_settings.gravity_on != global_settings.gravity_on) {
+        *gravity = updated_global_settings.gravity_on ? gravity0 : vec2(0, 0);
     } 
     global_settings = updated_global_settings;
     return;
@@ -602,6 +610,10 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
     }
     if (key == GLFW_KEY_S && action == GLFW_PRESS) {
         updated_global_settings.paused ^= 1; 
+        need_reload_global_settings = true;
+    }
+    if (key == GLFW_KEY_G && action == GLFW_PRESS) {
+        updated_global_settings.gravity_on ^= 1; 
         need_reload_global_settings = true;
     }
 }
@@ -967,6 +979,8 @@ static void draw_help(const Program* text_program, const Uniform* text_color_uni
     offset += 20;
     render_text(global_settings.paused ? "`S`   > RESUME": "`S`   > STOP", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
     offset += 20;
+    render_text(global_settings.gravity_on ? "`G`   > DISABLE GRAVITY": "`G`   > ENABLE_GRAVITY", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
     render_text("`R`   > RESET", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
 } 
 // END MENUS
@@ -1157,10 +1171,11 @@ int main(void)
     size_t number_of_particles = 2000;
     float particle_radius = 2.0f;
     float particle_mass = 0.5f;
-    Vec2 gravity = (Vec2) {.x = 0, .y = -300};
+    Vec2 gravity0 = (Vec2) {.x = 0, .y = -300};
+    Vec2 gravity = gravity0;
     float dampig_coefficient = 0.7;
     float smoothing_radius = 50;
-    float pressure_multiplier      = 30000;
+    float pressure_multiplier      = 35000;
     float near_pressure_multiplier = 5000;
     float viscosity_multiplier = 700;
     float target_density = 0.0003;
@@ -1215,8 +1230,9 @@ int main(void)
     global_settings.draw_density = false;
     global_settings.draw_flow = true;
     global_settings.draw_particles = true;
+    global_settings.gravity_on = true;
     updated_global_settings = global_settings;
-    reload_global_settings(particles_program.program_id, draw_density_uniform->location);
+    reload_global_settings(particles_program.program_id, draw_density_uniform->location, &gravity, gravity0);
 
     GLCall(glUseProgram(particles_program.program_id));
     GLCall(glUniform1f(particle_radius_uniform->location, particle_radius));
@@ -1255,7 +1271,7 @@ int main(void)
         clock_tick(&clock, TIME_PER_FRAME_NS);
             
         if (need_reload_global_settings) {
-            reload_global_settings(particles_program.program_id, draw_density_uniform->location);
+            reload_global_settings(particles_program.program_id, draw_density_uniform->location, &gravity, gravity0);
             need_reload_global_settings = false;
         }
         if (should_reset)

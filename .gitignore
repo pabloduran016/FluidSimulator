@@ -5,3 +5,5 @@ bin/
 log/
 default.profraw
 profdata_show.log
+profile.txt
+merge.out
