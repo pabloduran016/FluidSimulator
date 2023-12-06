@@ -1058,7 +1058,7 @@ int main(void)
     init_program(&interaction_force_program);
 
     // PARTICLES PROGRAM
-#define MAX_NUMBER_OF_PARTICLES 3000
+#define MAX_NUMBER_OF_PARTICLES 5000
     ParticleVertex particle_vertices[MAX_NUMBER_OF_PARTICLES] = {0};
     size_t number_of_vertices;
     Uniform particles_uniforms[] = {
@@ -1168,24 +1168,25 @@ int main(void)
     init_program(&density_program);
    
     // SETTINGS
-    size_t number_of_particles = 2000;
+    size_t number_of_particles = 4000;
+    assert(number_of_particles <= MAX_NUMBER_OF_PARTICLES);
     float particle_radius = 2.0f;
     float particle_mass = 0.5f;
     Vec2 gravity0 = (Vec2) {.x = 0, .y = -300};
     Vec2 gravity = gravity0;
-    float dampig_coefficient = 0.7;
-    float smoothing_radius = 50;
-    float pressure_multiplier      = 35000;
-    float near_pressure_multiplier = 5000;
-    float viscosity_multiplier = 700;
-    float target_density = 0.0003;
+    float dampig_coefficient = 0.6;
+    float smoothing_radius = 30;
+    float pressure_multiplier      = 50000;
+    float near_pressure_multiplier = 7000;
+    float viscosity_multiplier = 1200;
+    float target_density = 0.0012;
     float wall_force_radius = particle_radius*1.1;
-    float wall_force_multiplier = 200;
+    float wall_force_multiplier = 200*0;
     
     Vec2 interaction_position;
-    float interaction_radius = 90;
+    float interaction_radius = 70;
     float interaction_multiplier_attraction = 80;
-    float interaction_multiplier_repulsion = -80;
+    float interaction_multiplier_repulsion = -60;
     float interaction_multiplier = 0;
 
     Particle particles[MAX_NUMBER_OF_PARTICLES] = {0};
@@ -1194,11 +1195,11 @@ int main(void)
     // for (size_t i = 0; i < number_of_particles; ++i) {
     //     particles[i] = (Particle) {.pos = {randnum(- window_width / 2, window_width / 2), randnum(- window_height / 2, window_height / 2)}, .vel = {randnum(-MAX_INITIAL_VELOCITY, MAX_INITIAL_VELOCITY), randnum(-MAX_INITIAL_VELOCITY, MAX_INITIAL_VELOCITY)}};
     // }
-    int spacing = smoothing_radius*0.12;
+    int spacing = smoothing_radius*0.2;
     float max_velocity = 0;
     init_particles(particles, number_of_particles, max_velocity, spacing);
 
-#define FPS 200
+#define FPS 60
 #define TIME_PER_FRAME_NS 1e9 / FPS
 
     Density densities[MAX_NUMBER_OF_PARTICLES] = {0};
@@ -1267,8 +1268,10 @@ int main(void)
 
     while (!glfwWindowShouldClose(window))
     {
+#define MIN_DT 1/30
         // Clock tick FPS
         clock_tick(&clock, TIME_PER_FRAME_NS);
+        double dt = fmax(clock.dt, MIN_DT);
             
         if (need_reload_global_settings) {
             reload_global_settings(particles_program.program_id, draw_density_uniform->location, &gravity, gravity0);
@@ -1298,8 +1301,9 @@ int main(void)
             // Physics -> slow (6.4 / 7.2)
 
             // Physics-Predicted Positions -> fast (0.0021 / 7.2)
+#define PREDICTED_TIME_STEP 0
             for (size_t i = 0; i < number_of_particles; ++i) {
-                predicted_positions[i] = vec2_add(particles[i].pos, vec2_scale(particles[i].vel, 1/120));
+                predicted_positions[i] = vec2_add(particles[i].pos, vec2_scale(particles[i].vel, PREDICTED_TIME_STEP));
                 velocities[i] = particles[i].vel;
             }
 
@@ -1361,8 +1365,8 @@ int main(void)
                     vec2_scale(viscosity_force, 1/particle_mass)),
                     interaction_force
                 );
-                Vec2 new_vel = vec2_add(vel, vec2_scale(acceleration, clock.dt));
-                Vec2 new_pos = vec2_add(pos, vec2_scale(vec2_add(new_vel, vel), clock.dt/2));
+                Vec2 new_vel = vec2_add(vel, vec2_scale(acceleration, dt));
+                Vec2 new_pos = vec2_add(pos, vec2_scale(vec2_add(new_vel, vel), dt/2));
                 if ((new_pos.x + particle_radius) >= window_width / 2) {
                     new_pos.x = window_width / 2 - particle_radius;
                     new_vel.x *= -dampig_coefficient;
