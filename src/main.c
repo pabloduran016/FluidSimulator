@@ -431,7 +431,7 @@ Forces calculate_forces(
 
                 Vec2 dir;
                 if (length_squared == 0) {
-                    dir = vec2_normalize((Vec2) {randnum(-1, 1), randnum(-1, 1)});
+                   dir = vec2_normalize((Vec2) {randnum(-1, 1), randnum(-1, 1)});
                 } else {
                     dir = vec2_normalize(d_pos);
                 }
@@ -555,6 +555,17 @@ static inline void clock_tick(Clock *clock, const long int time_per_frame_ns)
 
 
 // BEGIN GLOBAL SETTINGS
+typedef enum {
+    MOUSE_MODE_INTERACTION = 0,
+    MOUSE_MODE_SPAWN,
+    MOUSE_MODE_COUNT,
+} MouseMode;
+
+char* mouse_mode_name[MOUSE_MODE_COUNT] = {
+    "INTERACTION",
+    "SPAWN",
+};
+
 typedef struct {
     bool draw_density;
     bool draw_flow;
@@ -562,6 +573,7 @@ typedef struct {
     bool draw_help;
     bool paused;
     bool gravity_on;
+    MouseMode mouse_mode;
 } GlobalSettings;
 
 GlobalSettings global_settings;
@@ -616,22 +628,42 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
         updated_global_settings.gravity_on ^= 1; 
         need_reload_global_settings = true;
     }
+    if (key == GLFW_KEY_M && action == GLFW_PRESS) {
+        updated_global_settings.mouse_mode += 1;
+        if (updated_global_settings.mouse_mode >= MOUSE_MODE_COUNT) updated_global_settings.mouse_mode = (MouseMode) 0;
+        need_reload_global_settings = true;
+    }
 }
 // END USER INTERACTION
 
 
 // BEGIN INITIALIZATION
-static void init_particles(Particle* particles, size_t n_particles, float max_velocity, float spacing)
+
+#define MAX_NUMBER_OF_PARTICLES 5000
+
+static bool add_particle(Particle* particles, size_t *n_particles, Vec2 pos, Vec2 vel)
 {
+    if (*n_particles >= MAX_NUMBER_OF_PARTICLES) return false;
+
+    particles[*n_particles] = (Particle) {.pos = pos, .vel = vel};
+    (*n_particles)++;
+
+    return true;
+}
+
+static size_t init_particles(Particle* particles, size_t n_particles, float max_initial_velocity, float spacing)
+{
+    size_t added_particles = 0;
     size_t ncols = (int) sqrt(n_particles);
     size_t nrows = n_particles / ncols + 1;
     for (size_t i = 0; i < ncols; i++) {
         for (size_t j = 0; (j < nrows) && (i*nrows + j) < n_particles; j++) {
-            size_t p_indx = i*nrows + j;
             Vec2 pos = {(i - ncols/2.f) * spacing, (nrows/2.f - j) * spacing};
-            particles[p_indx] = (Particle) {.pos = pos, .vel = vec2(randnum(-max_velocity, max_velocity), randnum(-max_velocity, max_velocity))};
+            Vec2 vel = vec2(randnum(-max_initial_velocity, max_initial_velocity), randnum(-max_initial_velocity, max_initial_velocity));
+            if (!add_particle(particles, &added_particles, pos, vel)) return added_particles;
         }
     }
+    return added_particles;
 }
 
 bool initialized_glfw = false;
@@ -981,6 +1013,8 @@ static void draw_help(const Program* text_program, const Uniform* text_color_uni
     offset += 20;
     render_text(global_settings.gravity_on ? "`G`   > DISABLE GRAVITY": "`G`   > ENABLE_GRAVITY", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
     offset += 20;
+    render_text("`M`   > MOUSE MODE", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
+    offset += 20;
     render_text("`R`   > RESET", x, y - offset, 0.5f, text_program->program_id, text_program->vao.id, text_program->vbo.id, text_color_uniform->location, text_color);
 } 
 // END MENUS
@@ -1058,7 +1092,6 @@ int main(void)
     init_program(&interaction_force_program);
 
     // PARTICLES PROGRAM
-#define MAX_NUMBER_OF_PARTICLES 5000
     ParticleVertex particle_vertices[MAX_NUMBER_OF_PARTICLES] = {0};
     size_t number_of_vertices;
     Uniform particles_uniforms[] = {
@@ -1168,22 +1201,22 @@ int main(void)
     init_program(&density_program);
    
     // SETTINGS
-    size_t number_of_particles = 4000;
+    size_t number_of_particles = 1000;
     assert(number_of_particles <= MAX_NUMBER_OF_PARTICLES);
     float particle_radius = 2.0f;
     float particle_mass = 0.5f;
     Vec2 gravity0 = (Vec2) {.x = 0, .y = -300};
     Vec2 gravity = gravity0;
     float dampig_coefficient = 0.6;
-    float smoothing_radius = 30;
-    float pressure_multiplier      = 50000;
+    float smoothing_radius = 35;
+    float pressure_multiplier      = 20000;
     float near_pressure_multiplier = 7000;
-    float viscosity_multiplier = 1200;
+    float viscosity_multiplier = 1000;
     float target_density = 0.0012;
     float wall_force_radius = particle_radius*1.1;
-    float wall_force_multiplier = 200*0;
+    float wall_force_multiplier = 200;
     
-    Vec2 interaction_position;
+    Vec2 mouse_position;
     float interaction_radius = 70;
     float interaction_multiplier_attraction = 80;
     float interaction_multiplier_repulsion = -60;
@@ -1196,8 +1229,8 @@ int main(void)
     //     particles[i] = (Particle) {.pos = {randnum(- window_width / 2, window_width / 2), randnum(- window_height / 2, window_height / 2)}, .vel = {randnum(-MAX_INITIAL_VELOCITY, MAX_INITIAL_VELOCITY), randnum(-MAX_INITIAL_VELOCITY, MAX_INITIAL_VELOCITY)}};
     // }
     int spacing = smoothing_radius*0.2;
-    float max_velocity = 0;
-    init_particles(particles, number_of_particles, max_velocity, spacing);
+    float max_initial_velocity = 0;
+    init_particles(particles, number_of_particles, max_initial_velocity, spacing);
 
 #define FPS 60
 #define TIME_PER_FRAME_NS 1e9 / FPS
@@ -1228,10 +1261,11 @@ int main(void)
     Clock clock;
     clock_init(&clock);
 
-    global_settings.draw_density = false;
-    global_settings.draw_flow = true;
+    global_settings.draw_density = true;
+    global_settings.draw_flow = false;
     global_settings.draw_particles = true;
     global_settings.gravity_on = true;
+    global_settings.mouse_mode = MOUSE_MODE_INTERACTION;
     updated_global_settings = global_settings;
     reload_global_settings(particles_program.program_id, draw_density_uniform->location, &gravity, gravity0);
 
@@ -1268,10 +1302,10 @@ int main(void)
 
     while (!glfwWindowShouldClose(window))
     {
-#define MIN_DT 1/30
+#define MIN_DT 1/30.0f
         // Clock tick FPS
         clock_tick(&clock, TIME_PER_FRAME_NS);
-        double dt = fmax(clock.dt, MIN_DT);
+        double dt = fmin(clock.dt, MIN_DT);
             
         if (need_reload_global_settings) {
             reload_global_settings(particles_program.program_id, draw_density_uniform->location, &gravity, gravity0);
@@ -1279,21 +1313,32 @@ int main(void)
         }
         if (should_reset)
         {
-            init_particles(particles, number_of_particles, max_velocity, spacing);
+            init_particles(particles, number_of_particles, max_initial_velocity, spacing);
             should_reset = false;
         }
         
-        int pressed_left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);	
-        int pressed_right = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);	
-        interaction_multiplier = 0;
-        if (pressed_right == GLFW_PRESS) {
-            interaction_multiplier = interaction_multiplier_repulsion;
-        } else if (pressed_left == GLFW_PRESS) {
-            interaction_multiplier = interaction_multiplier_attraction;
-        }
         double mouse_xpos, mouse_ypos;
         glfwGetCursorPos(window, &mouse_xpos, &mouse_ypos);
-        interaction_position = vec2(mouse_xpos - window_width / 2, window_height / 2 - mouse_ypos);	
+        mouse_position = vec2(mouse_xpos - window_width / 2, window_height / 2 - mouse_ypos);	
+        int pressed_left = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT);	
+        int pressed_right = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT);	
+
+        interaction_multiplier = 0;
+        if (global_settings.mouse_mode == MOUSE_MODE_INTERACTION) {
+            if (pressed_right == GLFW_PRESS) {
+                interaction_multiplier = interaction_multiplier_repulsion;
+            } else if (pressed_left == GLFW_PRESS) {
+                interaction_multiplier = interaction_multiplier_attraction;
+            }
+        } else if (global_settings.mouse_mode == MOUSE_MODE_SPAWN) {
+            if (pressed_left == GLFW_PRESS) {
+                const float max_initial_velocity = 2;
+                Vec2 vel = vec2(randnum(-max_initial_velocity, max_initial_velocity), randnum(-max_initial_velocity, max_initial_velocity));
+                (void) add_particle(particles, &number_of_particles, mouse_position, vel);
+            }
+        }
+
+
         
         if (!global_settings.paused)
         {
@@ -1347,7 +1392,7 @@ int main(void)
             TIME_THIS_END(physics_loop_calculate_forces)
 
             for (size_t i = 0; i < number_of_particles; ++i) {
-                interaction_forces[i] = interaction_multiplier != 0 ? calculate_interaction_force(i, predicted_positions, velocities, interaction_position, interaction_radius, interaction_multiplier) : vec2(0, 0);
+                interaction_forces[i] = interaction_multiplier != 0 ? calculate_interaction_force(i, predicted_positions, velocities, mouse_position, interaction_radius, interaction_multiplier) : vec2(0, 0);
             }
             
             // Physics-Update Particles -> normal-fast (0.02 / 7.2)
@@ -1474,7 +1519,7 @@ int main(void)
         if (interaction_multiplier != 0) {
             GLCall(glUseProgram(interaction_force_program.program_id));
             GLCall(glBindBuffer(GL_ARRAY_BUFFER, interaction_force_program.vbo.id));
-                GLCall(glBufferSubData(GL_ARRAY_BUFFER, 0, 1 * sizeof(Vec2), &interaction_position));
+                GLCall(glBufferSubData(GL_ARRAY_BUFFER, 0, 1 * sizeof(Vec2), &mouse_position));
             GLCall(glBindBuffer(GL_ARRAY_BUFFER, 0));
             GLCall(glBindVertexArray(interaction_force_program.vao.id));
                 GLCall(glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, 1));
@@ -1493,6 +1538,10 @@ int main(void)
         } else {
             render_text("PRESS `H` FOR HELP", window_width / 2 - 160, window_height/2 - 18, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
         }
+
+        char mouse_mode_text[100];
+        sprintf(mouse_mode_text, "<NUMBER_OF_PARTICLES> %zu <MOUSE MODE> %s", number_of_particles, mouse_mode_name[(size_t) global_settings.mouse_mode]);
+        render_text(mouse_mode_text, strlen(mouse_mode_text) * - 0.5f * 8, window_height/2 - 18, 0.5f, text_program.program_id, text_program.vao.id, text_program.vbo.id, text_color_uniform->location, text_color);
 
         GLCall(glUseProgram(0));
         // Swap Buffers -> normal-slow (0.19 / 7.2)
